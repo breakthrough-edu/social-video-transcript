@@ -21,6 +21,10 @@ WLANG="${WHISPER_LANG:-}"
 # Browsers to try for cookies if the first download is blocked (risk-control on Douyin,
 # login-gating on Instagram/Facebook). Override with one browser, e.g. COOKIE_BROWSER=safari.
 COOKIE_BROWSERS="${COOKIE_BROWSER:-${DOUYIN_COOKIE_BROWSER:-chrome safari firefox edge arc brave}}"
+# Hard cap (seconds) on EACH cookie-based yt-dlp call. --cookies-from-browser can hang
+# indefinitely on a macOS Keychain access prompt; this bounds it so the loop moves on.
+COOKIE_TIMEOUT="${COOKIE_TIMEOUT:-${DOUYIN_COOKIE_TIMEOUT:-30}}"
+TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
 
 # --- pre-flight ---
 for t in yt-dlp ffmpeg whisperkit-cli python3; do
@@ -58,19 +62,46 @@ trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "WORKDIR=$WORKDIR"; fi' EXIT
 cd "$WORKDIR"
 
 # --- download metadata + 16kHz mono WAV; retry over browsers if the first try is blocked ---
+# Bounded yt-dlp: ytdlp <secs|0> <args...>. secs>0 enforces a hard timeout (kills the
+# process -- and dismisses a hung Keychain prompt -- if it exceeds the limit). Uses
+# timeout/gtimeout when present, else a background-watchdog fallback (macOS ships no `timeout`).
+ytdlp() {
+  local secs="$1"; shift
+  if [ "$secs" -le 0 ]; then yt-dlp "$@"; return $?; fi
+  if [ -n "$TIMEOUT_BIN" ]; then "$TIMEOUT_BIN" -k 5 "$secs" yt-dlp "$@"; return $?; fi
+  local p w rc=0
+  yt-dlp "$@" & p=$!
+  ( sleep "$secs"; kill -TERM "$p" 2>/dev/null; sleep 3; kill -KILL "$p" 2>/dev/null ) & w=$!
+  wait "$p" 2>/dev/null || rc=$?
+  kill -TERM "$w" 2>/dev/null || true
+  wait "$w" 2>/dev/null || true
+  return "$rc"
+}
+# fetch <secs|0> [extra yt-dlp args...] -- secs bounds each underlying yt-dlp call.
 fetch() {
-  yt-dlp --no-warnings --skip-download --write-info-json -o "v.%(ext)s" "$@" "$URL" >/dev/null 2>&1 || true
-  yt-dlp --no-warnings -f "ba/b" -x --audio-format wav \
+  local secs="$1"; shift
+  ytdlp "$secs" --no-warnings --skip-download --write-info-json -o "v.%(ext)s" "$@" "$URL" >/dev/null 2>&1 || true
+  ytdlp "$secs" --no-warnings -f "ba/b" -x --audio-format wav \
     --postprocessor-args "-ar 16000 -ac 1" -o "audio.%(ext)s" "$@" "$URL" >/dev/null 2>&1 || true
 }
-fetch
+fetch 0   # plain attempt: no cookies, no Keychain risk, so no timeout
 if [ ! -f "$WORKDIR/audio.wav" ]; then
   for b in $COOKIE_BROWSERS; do
-    fetch --cookies-from-browser "$b"
+    fetch "$COOKIE_TIMEOUT" --cookies-from-browser "$b"
     [ -f "$WORKDIR/audio.wav" ] && break
   done
 fi
-[ -f "$WORKDIR/audio.wav" ] || { echo "DOWNLOAD_FAILED url=$URL platform=$PLATFORM (blocked: Douyin risk-control, or Instagram/Facebook login-gating. Open the video once in your logged-in browser then retry, set COOKIE_BROWSER=<that-browser>, update yt-dlp, or use a parse-API fallback)"; exit 5; }
+
+# --- Douyin last resort: parse-API fallback (yt-dlp can't beat a_bogus risk-control) ---
+# Douyin's detail endpoint returns an empty body unless the request ran their in-browser
+# a_bogus JS challenge, so yt-dlp (even nightly, with cookies + TLS impersonation) gets no
+# video URL. The helper walks a chain of free parse APIs that run the challenge server-side,
+# downloads from Douyin's CDN, and writes audio.wav + meta.json here. Douyin-only on purpose:
+# IG/FB/XHS failures are login-gating that cookies, not parsers, fix.
+if [ ! -f "$WORKDIR/audio.wav" ] && [ "$PLATFORM" = "douyin" ]; then
+  python3 "$HERE/douyin-parse-fallback.py" "$URL" "$WORKDIR" >&2 || true
+fi
+[ -f "$WORKDIR/audio.wav" ] || { echo "DOWNLOAD_FAILED url=$URL platform=$PLATFORM (blocked: Douyin a_bogus risk-control AND all parse APIs missed, or Instagram/Facebook login-gating. For IG/FB open the video once in your logged-in browser then retry, or set COOKIE_BROWSER=<that-browser>; keep yt-dlp recent. Don't fake a transcript.)"; exit 5; }
 
 # --- transcribe (local large-v3; --model-path => fully offline, no HF download/hang) ---
 # Auto-detect language unless WHISPER_LANG was set.
@@ -108,9 +139,19 @@ if os.path.exists(srt_path):
 open(os.path.join(wd, 'raw.txt'), 'w', encoding='utf-8').write(body)
 keys = ['title','description','uploader','uploader_id','duration','webpage_url',
         'upload_date','like_count','comment_count','repost_count','track']
-meta = {k: info.get(k) for k in keys}
-meta['platform'] = platform
-open(os.path.join(wd, 'meta.json'), 'w', encoding='utf-8').write(
+# Prefer a meta.json already written by the parse-API fallback (yt-dlp produced no
+# v.info.json on that path); only build from yt-dlp's info when none exists.
+meta_path = os.path.join(wd, 'meta.json')
+meta = {}
+if os.path.exists(meta_path):
+    try:
+        meta = json.load(open(meta_path, encoding='utf-8'))
+    except Exception:
+        meta = {}
+if not meta:
+    meta = {k: info.get(k) for k in keys}
+meta.setdefault('platform', platform)
+open(meta_path, 'w', encoding='utf-8').write(
     json.dumps(meta, ensure_ascii=False, indent=2))
 PY
 

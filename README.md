@@ -20,7 +20,7 @@ Anything [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) can fetch works. Verified 
 
 | Platform | Notes |
 |---|---|
-| Douyin (抖音) | occasionally trips `a_bogus` risk-control -- fresh cookies fix it |
+| Douyin (抖音) | `a_bogus` risk-control now blocks yt-dlp -- the skill auto-falls-back to a parse-API chain |
 | Xiaohongshu / RED (小红书) | `xhslink.com` short links resolve fine |
 | Instagram | reels + posts; non-public usually needs login cookies |
 | Facebook | video + reels; often needs login cookies |
@@ -103,13 +103,15 @@ The transcript is a faithful, lightly-cleaned base for whatever you do next (sum
 
 Different platforms fail differently:
 
+- **Douyin** -- Douyin's `a_bogus` JS-VM risk-control now returns nothing to yt-dlp (cookies, TLS impersonation, and nightly builds all fail), so the skill **automatically falls back** to a chain of free public parse APIs that run the challenge server-side, then downloads from Douyin's own CDN. You don't do anything. yt-dlp is still tried first, so it self-heals if the extractor is fixed upstream -- keep it recent (`yt-dlp -U` / `brew upgrade yt-dlp`). If it still fails, every parser in the chain was down (free APIs die often); retry later.
 - **Instagram / Facebook** -- most non-public content is **login-gated**. The skill auto-retries with cookies from your browsers (Chrome, Safari, Firefox, Edge, Arc, Brave). If it still fails, open the video once in your logged-in browser, then retry; pin one with `COOKIE_BROWSER=chrome`.
-- **Douyin** -- occasionally trips `a_bogus` / risk-control. Same fix: fresh cookies, and keep `yt-dlp` recent (`yt-dlp -U` or `brew upgrade yt-dlp`).
 - Any platform: a recent `yt-dlp` matters most -- extractors break and get fixed upstream constantly.
 
 ## Privacy
 
-Everything runs on your machine. The video, the audio, and the transcript never leave it. The only network access is the video download and the one-time model fetch from Hugging Face.
+Everything runs on your machine. The video, the audio, and the transcript never leave it. Network access is limited to the video download and the one-time model fetch from Hugging Face.
+
+One exception: the **Douyin parse-API fallback**. Because Douyin's `a_bogus` risk-control blocks yt-dlp, a Douyin link that yt-dlp can't fetch is sent (URL only) to a third-party "公益" / free parse service that runs Douyin's challenge and returns the real CDN url. The video bytes still download straight from Douyin's CDN, not through the parser, and this only happens for Douyin links after yt-dlp fails. If you'd rather not involve any third party, the skill failing loudly is the alternative -- it never fabricates a transcript.
 
 ## License
 

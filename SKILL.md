@@ -24,7 +24,7 @@ Pipeline is 100% local and free (~12s for a 44s clip on Apple Silicon). Same loc
 
 Anything `yt-dlp` can fetch works. Verified extractors: **Douyin**, **Xiaohongshu / RED (小红书)**, **Instagram** (reels + posts), **Facebook** (video + reels), **TikTok**. A link from any other yt-dlp-supported site also runs (labelled `video`).
 
-> Download reliability differs by platform. Douyin occasionally trips `a_bogus` risk-control; Instagram and Facebook often require you to be **logged in** (the script auto-retries with your browser cookies). See "When the download is blocked".
+> Download reliability differs by platform. Douyin's `a_bogus` risk-control now defeats yt-dlp outright, so the script **auto-falls-back to a parse-API chain** for Douyin links; Instagram and Facebook often require you to be **logged in** (the script auto-retries with your browser cookies). See "When the download is blocked".
 
 ## When to load
 
@@ -40,7 +40,7 @@ brew install whisperkit-cli ffmpeg yt-dlp
 
 Not portable to Intel mac / Windows / Linux -- if you need that, use a cross-platform Whisper engine (e.g. faster-whisper / whisper.cpp) instead.
 
-> Throughout, `<skill-dir>` is this skill's install directory (where this SKILL.md lives, e.g. `~/.claude/skills/social-video-transcript`). The two helper scripts ship in `<skill-dir>/scripts/`.
+> Throughout, `<skill-dir>` is this skill's install directory (where this SKILL.md lives, e.g. `~/.claude/skills/social-video-transcript`). The helper scripts ship in `<skill-dir>/scripts/` -- `ensure-model.sh`, `dl-transcribe.sh`, and the Douyin-only `douyin-parse-fallback.py`.
 
 ---
 
@@ -88,7 +88,7 @@ Language is **auto-detected** by Whisper. To force a language on a noisy clip, s
 - `MISSING_TOOL=<t>` -- a binary is absent (`yt-dlp` / `ffmpeg` / `whisperkit-cli` / `python3`); tell the user the Homebrew install line from Requirements.
 - `MISSING_MODEL=<path>` -- the model isn't at the resolved path; go back to **Phase 0** (`ensure-model.sh`) to locate or download it, then re-run with `WHISPER_MODEL_PATH` exported.
 - `NO_URL` -- couldn't find a URL in the input; ask the user to re-paste the link.
-- `DOWNLOAD_FAILED` -- yt-dlp couldn't fetch it. The script already retried with cookies from several browsers (chrome / safari / firefox / edge / arc / brave). See "When the download is blocked" below; don't fake a transcript.
+- `DOWNLOAD_FAILED` -- the video couldn't be fetched. The script already retried with cookies from several browsers (chrome / safari / firefox / edge / arc / brave) and, for Douyin links, walked the parse-API fallback chain. See "When the download is blocked" below; don't fake a transcript.
 - `TRANSCRIBE_FAILED` -- the download worked but whisperkit-cli failed or produced no text (corrupt/partial model, OOM, or a clip with no speech). The script keeps a `whisper.log` in the printed WORKDIR; point the user there. Often a re-run of Phase 0 `--download` (model didn't fully assemble) fixes it.
 
 > The script also prints `WORKDIR=` on these failure paths, so you can inspect logs and clean up. Don't pre-empt with cookies unless the first try fails.
@@ -167,10 +167,12 @@ tags: [<platform>, transcript]
 
 Different platforms fail differently:
 
+- **Douyin** -- Douyin's `a_bogus` JS-VM risk-control now returns an empty response to yt-dlp regardless of cookies, TLS impersonation, or yt-dlp version, so yt-dlp can no longer resolve the video. The script handles this **automatically**: when yt-dlp fails on a Douyin link it runs `douyin-parse-fallback.py`, which walks a chain of free public "解析" (parse) APIs that execute the challenge server-side, returns Douyin's real CDN url, and downloads + extracts locally. You do nothing. It still tries yt-dlp **first** (so it self-heals if the extractor is fixed upstream); keep `yt-dlp` recent anyway (`yt-dlp -U` / `brew upgrade yt-dlp`). If `DOWNLOAD_FAILED` still prints, the whole parse chain was down (these free APIs die often) -- retry later, or add a new parser to the chain in `douyin-parse-fallback.py`.
 - **Instagram / Facebook** -- most non-public content is **login-gated**. The script auto-retries with cookies from your browsers. If it still fails, open the video once in your logged-in browser, then retry; pin the right browser with `COOKIE_BROWSER=chrome` (or `safari` / `firefox` / `edge` / `arc` / `brave`).
-- **Douyin** -- occasionally trips `a_bogus` / risk-control. Same fix: fresh browser cookies (`COOKIE_BROWSER=…`), and make sure `yt-dlp` is recent (`yt-dlp -U` or `brew upgrade yt-dlp`) -- the extractor is patched often.
 - **Xiaohongshu** -- short `xhslink.com` links resolve fine; some posts are login-gated like IG/FB.
 - Any platform: a recent `yt-dlp` matters most -- extractors break and get fixed upstream constantly.
+
+> **Privacy note on the Douyin fallback.** The parse-API path sends only the *public video URL* to a third-party "公益" (free / non-profit) parse service so it can run Douyin's JS challenge; the service hands back Douyin's own CDN url and the **video bytes download straight from Douyin's CDN, not through the parser**. It fires only for Douyin links, only as a fallback after yt-dlp fails. If you'd rather not involve a third party at all, a `DOWNLOAD_FAILED` is the honest alternative -- the skill never fabricates a transcript.
 
 ---
 
@@ -180,4 +182,15 @@ Different platforms fail differently:
 - Language is auto-detected (no `--language` passed) unless you set `WHISPER_LANG`. Whisper large-v3 detects per-clip via VAD prefill; force it only for noisy or heavily code-switched audio.
 - A platform's `music` / `audio` URL is background BGM, not the voiceover -- the script downloads the video and extracts the mixed track (`-x`).
 - Most of these platforms expose no native subtitle track, so ASR is mandatory.
-- Everything stays on your machine. The only network access is the video download and the one-time model fetch from Hugging Face.
+- Everything stays on your machine. Network access is limited to: the video download, the one-time model fetch from Hugging Face, and -- only as a Douyin fallback after yt-dlp fails -- sending the public video URL to a parse API (see the Privacy note above).
+- The Douyin parse-API fallback needs no extra Python packages: it uses the system `curl` (always present on macOS) to call the parser and pull CDN bytes, then `ffmpeg` to extract audio. No `curl_cffi` / TLS-impersonation dependency.
+
+---
+
+## Skill metadata
+
+- **Version**: 1.1 (2026-06-28) -- added the Douyin parse-API fallback (`douyin-parse-fallback.py`) for when yt-dlp can't beat `a_bogus` risk-control, plus a bounded timeout on cookie-based yt-dlp calls (stops the macOS Keychain hang). 1.0 was the initial multi-platform release (2026-06-21).
+- **Vault SOT**: `04_Resources/Skills/social-video-transcript/`
+- **Symlink**: `~/.claude/skills/social-video-transcript` → vault SOT
+- **GitHub**: `github.com/breakthrough-edu/social-video-transcript` (`npx skills add breakthrough-edu/social-video-transcript`)
+- **Supersedes**: `douyin-transcript` (retired -- this is its multi-platform successor).
