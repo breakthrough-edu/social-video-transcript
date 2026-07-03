@@ -4,7 +4,7 @@
 # Scans the common model locations first; only downloads when explicitly asked
 # (--download), because the model is ~1.5 GB. Downloads the EXACT snapshot the skill
 # is tuned on (openai_whisper-large-v3-v20240930) from Hugging Face. NOTE: whisperkit-cli
-# has no standalone download command -- the model is fetched as a side effect of
+# has no standalone download command; the model is fetched as a side effect of
 # `transcribe`, which REQUIRES an audio path, so we feed it a 1s silent WAV (built with
 # ffmpeg). The model lands nested under <dir>/models/argmaxinc/whisperkit-coreml/<name>.
 #

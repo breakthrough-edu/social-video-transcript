@@ -119,7 +119,7 @@ Output folder: `${OUTPUT_DIR:-${DOUYIN_OUTPUT_DIR:-$HOME/Downloads/social-video-
 
 Path: `<output-folder>/<YYYY-MM-DD>-<platform>-<title-slug>.md` (today's date; `<platform>` from the `PLATFORM=` marker; slug = title kebab-cased, drop emoji / `#hashtags` / punctuation, ~6 words max).
 
-Formatting: no em dashes, no double dashes (--), no spaced hyphens as separators (use standard punctuation: comma / colon / period / parentheses), preserve 中英混排, hyphen-no-space filename.
+Formatting: No em dashes, no double dashes (--), no spaced hyphens as separators; use standard punctuation only (comma, colon, period, parentheses); restructure the sentence if needed. Preserve 中英混排, hyphen-no-space filename.
 
 Template (use the transcript's own language for the body heading: `逐字稿（轻清洗版）` for Chinese, `Transcript (light-cleaned)` for English):
 

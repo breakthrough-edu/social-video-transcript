@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # social-video-transcript :: resolve + download + extract audio + local Whisper transcribe.
-# Works with any platform yt-dlp supports -- Douyin, Xiaohongshu (小红书), Instagram,
+# Works with any platform yt-dlp supports: Douyin, Xiaohongshu (小红书), Instagram,
 # Facebook, TikTok, and more. Prints WORKDIR + PLATFORM + metadata + RAW transcript to
 # stdout. Leaves files in a /tmp mktemp WORKDIR for the agent to read; the agent removes
 # WORKDIR after writing the output .md.
@@ -63,7 +63,7 @@ cd "$WORKDIR"
 
 # --- download metadata + 16kHz mono WAV; retry over browsers if the first try is blocked ---
 # Bounded yt-dlp: ytdlp <secs|0> <args...>. secs>0 enforces a hard timeout (kills the
-# process -- and dismisses a hung Keychain prompt -- if it exceeds the limit). Uses
+# process, and dismisses a hung Keychain prompt, if it exceeds the limit). Uses
 # timeout/gtimeout when present, else a background-watchdog fallback (macOS ships no `timeout`).
 ytdlp() {
   local secs="$1"; shift
@@ -77,7 +77,7 @@ ytdlp() {
   wait "$w" 2>/dev/null || true
   return "$rc"
 }
-# fetch <secs|0> [extra yt-dlp args...] -- secs bounds each underlying yt-dlp call.
+# fetch <secs|0> [extra yt-dlp args...]: secs bounds each underlying yt-dlp call.
 fetch() {
   local secs="$1"; shift
   ytdlp "$secs" --no-warnings --skip-download --write-info-json -o "v.%(ext)s" "$@" "$URL" >/dev/null 2>&1 || true

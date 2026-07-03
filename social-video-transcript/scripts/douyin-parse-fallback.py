@@ -4,8 +4,8 @@
 Fallback Douyin fetcher for social-video-transcript, used ONLY when yt-dlp fails.
 
 Why this exists: Douyin's detail endpoint returns an empty body to any request that has
-not executed their in-browser `a_bogus` JS challenge, so yt-dlp -- even nightly, with
-browser cookies and TLS impersonation -- can no longer resolve the video URL. The only
+not executed their in-browser `a_bogus` JS challenge, so yt-dlp (even nightly, with
+browser cookies and TLS impersonation) can no longer resolve the video URL. The only
 paths that work run that JS challenge: a real browser, or a server-side "解析" (parse)
 service that does it for you and hands back the real CDN url.
 
@@ -61,7 +61,7 @@ def _canonical(url):
 
 # --- parsers: each takes the share url, returns (cdn_video_url, meta_dict) or None ---
 def p_xinyew(share_url):
-    # 新野API (公益接口) -- the one proven alive in the 2026-06-28 session.
+    # 新野API (公益接口): the one proven alive in the 2026-06-28 session.
     j = _api_json("https://api.xinyew.cn/api/douyinjx?url=" + urllib.parse.quote(share_url))
     if j.get("code") != 200:
         return None
@@ -76,7 +76,7 @@ def p_xinyew(share_url):
 
 
 def p_devtool(share_url):
-    # devtool.top (公益, keyless per its docs) -- data.video.url = no-watermark CDN url.
+    # devtool.top (公益, keyless per its docs): data.video.url = no-watermark CDN url.
     j = _api_json("https://www.devtool.top/api/douyin/parse?url=" + urllib.parse.quote(share_url))
     if j.get("code") != 200:
         return None
@@ -89,7 +89,7 @@ def p_devtool(share_url):
 
 
 def p_jxcxin(share_url):
-    # 创信API jxcxin (公益) -- data.url (a jxcxin proxy url, still curl-able via -L).
+    # 创信API jxcxin (公益): data.url (a jxcxin proxy url, still curl-able via -L).
     # Docs hint an apiKey MAY be required (err 3200-3202); keyless requests are still
     # processed (returned a parse-fail, not an auth-fail, in 2026-06-29 testing). Any
     # code != 200 -> None, so an apiKey gate just makes this parser fall through (fail-safe).
@@ -128,7 +128,7 @@ def _fetch_via(name, fn, share_url, wd, mp4, wav):
     """Run one parser for one URL form: resolve -> download -> 16kHz mono WAV.
     Returns a meta dict on success, or None (after logging why) so the caller moves on.
     Fail-safe: a wrong/empty parser response, a too-small download (error page), or an
-    ffmpeg failure all return None -- this can never yield a bad transcript."""
+    ffmpeg failure all return None; this can never yield a bad transcript."""
     try:
         res = fn(share_url)
     except Exception as e:
